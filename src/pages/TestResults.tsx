@@ -7,39 +7,66 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DOMAINS, EXAM_CONFIG } from "@/lib/constants";
 import { CheckCircle2, XCircle, Flag, ChevronDown, ChevronUp } from "lucide-react";
 
+interface QuestionData {
+  id: string;
+  domain: string;
+  question_text: string;
+  question_type: string;
+  options: any;
+  explanation: string | null;
+}
+
 interface TestAnswer {
   id: string;
   question_id: string;
   user_answers: string[];
   is_correct: boolean | null;
   is_flagged: boolean;
-  questions: {
-    domain: string;
-    question_text: string;
-    question_type: string;
-    options: any;
-    correct_answers: string[];
-    explanation: string | null;
-  };
+}
+
+interface ReviewData {
+  question_id: string;
+  correct_answers: string[];
+  explanation: string | null;
 }
 
 export default function TestResults() {
   const { attemptId } = useParams();
   const navigate = useNavigate();
   const [attempt, setAttempt] = useState<any>(null);
-  const [testAnswers, setTestAnswers] = useState<TestAnswer[]>([]);
+  const [testAnswers, setTestAnswers] = useState<(TestAnswer & { question?: QuestionData })[]>([]);
+  const [reviewData, setReviewData] = useState<Map<string, ReviewData>>(new Map());
   const [loading, setLoading] = useState(true);
   const [expandedQ, setExpandedQ] = useState<string | null>(null);
 
   useEffect(() => {
     if (!attemptId) return;
     (async () => {
+      // Fetch attempt and answers (questions join via questions_public view won't have correct_answers)
       const [{ data: att }, { data: ans }] = await Promise.all([
         supabase.from("test_attempts").select("*").eq("id", attemptId).single(),
-        supabase.from("test_answers").select("*, questions(*)").eq("attempt_id", attemptId),
-      ]);
+        supabase.from("test_answers").select("*").eq("attempt_id", attemptId),
+      ] as const);
       setAttempt(att);
-      setTestAnswers((ans as unknown as TestAnswer[]) || []);
+
+      // Fetch question details from public view (no correct_answers)
+      const ansData = (ans || []) as unknown as TestAnswer[];
+      const questionIds = ansData.map((a) => a.question_id);
+      const { data: questions } = await (supabase as any).from("questions_public").select("*").in("id", questionIds);
+      const questionMap = new Map<string, QuestionData>();
+      ((questions || []) as QuestionData[]).forEach((q) => questionMap.set(q.id, q));
+
+      const enriched = ansData.map((ta) => ({ ...ta, question: questionMap.get(ta.question_id) }));
+      setTestAnswers(enriched);
+
+      // Fetch correct answers via secure RPC
+      const { data: review } = await supabase.rpc("get_test_review", { p_attempt_id: attemptId });
+      if (review) {
+        const map = new Map<string, ReviewData>();
+        (review as ReviewData[]).forEach((r) => map.set(r.question_id, r));
+        setReviewData(map);
+      }
+
       setLoading(false);
     })();
   }, [attemptId]);
@@ -125,10 +152,12 @@ export default function TestResults() {
           </CardHeader>
           <CardContent className="space-y-2">
             {testAnswers.map((ta, i) => {
-              const q = ta.questions;
+              const q = ta.question;
               if (!q) return null;
               const options = Array.isArray(q.options) ? q.options : [];
               const isExpanded = expandedQ === ta.id;
+              const review = reviewData.get(ta.question_id);
+              const correctAnswers = review?.correct_answers || [];
               return (
                 <div key={ta.id} className="border rounded-lg overflow-hidden">
                   <button
@@ -150,27 +179,27 @@ export default function TestResults() {
                       <div className="space-y-1.5">
                         {options.map((opt: any) => {
                           const isUserPick = ta.user_answers.includes(opt.id);
-                          const isCorrect = q.correct_answers.includes(opt.id);
+                          const isCorrectOpt = correctAnswers.includes(opt.id);
                           return (
                             <div
                               key={opt.id}
                               className={`text-sm p-2 rounded ${
-                                isCorrect ? "bg-green-50 border border-green-200" : isUserPick ? "bg-red-50 border border-red-200" : "bg-muted/30"
+                                isCorrectOpt ? "bg-green-50 border border-green-200" : isUserPick ? "bg-red-50 border border-red-200" : "bg-muted/30"
                               }`}
                             >
                               <span className="flex items-center gap-2">
-                                {isCorrect && <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />}
-                                {isUserPick && !isCorrect && <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
+                                {isCorrectOpt && <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />}
+                                {isUserPick && !isCorrectOpt && <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
                                 {opt.text}
                               </span>
                             </div>
                           );
                         })}
                       </div>
-                      {q.explanation && (
+                      {review?.explanation && (
                         <div className="bg-primary/5 rounded-lg p-3 text-sm text-muted-foreground">
                           <span className="font-semibold text-foreground">Explanation: </span>
-                          {q.explanation}
+                          {review.explanation}
                         </div>
                       )}
                     </div>

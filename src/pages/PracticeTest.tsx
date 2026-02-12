@@ -8,7 +8,6 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { EXAM_CONFIG, DOMAIN_QUESTION_COUNTS } from "@/lib/constants";
-import { calculateScaledScore, isPassingScore } from "@/lib/scoring";
 import { Flag, Clock, ChevronLeft, ChevronRight, Send, Snowflake } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -23,7 +22,6 @@ interface Question {
   question_text: string;
   question_type: string;
   options: QuestionOption[];
-  correct_answers: string[];
   explanation: string | null;
 }
 
@@ -46,12 +44,11 @@ export default function PracticeTest() {
   const [showNav, setShowNav] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
 
-  // Load questions
+  // Load questions from the public view (no correct_answers exposed)
   useEffect(() => {
     if (!user) return;
     (async () => {
-      // Fetch all questions grouped by domain
-      const { data: allQ } = await supabase.from("questions").select("*");
+      const { data: allQ } = await (supabase as any).from("questions_public").select("*");
       if (!allQ || allQ.length === 0) {
         toast({ title: "No questions", description: "Please upload questions to the question bank first.", variant: "destructive" });
         navigate("/dashboard");
@@ -159,50 +156,36 @@ export default function PracticeTest() {
     setSubmitting(true);
     clearInterval(timerRef.current);
 
-    // Calculate scores
-    const domainScores: Record<string, { correct: number; total: number }> = {};
-    let correctCount = 0;
-
-    const answerRows = questions.map((q) => {
+    // Submit answers to server-side edge function for scoring
+    const answersPayload = questions.map((q) => {
       const ans = answers[q.id] || { userAnswers: [], isFlagged: false };
-      const isCorrect =
-        q.correct_answers.length === ans.userAnswers.length &&
-        q.correct_answers.every((ca) => ans.userAnswers.includes(ca));
-
-      if (!domainScores[q.domain]) domainScores[q.domain] = { correct: 0, total: 0 };
-      domainScores[q.domain].total++;
-      if (isCorrect) {
-        domainScores[q.domain].correct++;
-        correctCount++;
-      }
-
       return {
-        attempt_id: attemptId,
         question_id: q.id,
         user_answers: ans.userAnswers,
-        is_correct: isCorrect,
         is_flagged: ans.isFlagged,
-        answered_at: ans.userAnswers.length > 0 ? new Date().toISOString() : null,
       };
     });
 
-    const scaledScore = calculateScaledScore(domainScores);
-    const pass = isPassingScore(scaledScore);
+    try {
+      const { data, error } = await supabase.functions.invoke("submit-test", {
+        body: {
+          attempt_id: attemptId,
+          answers: answersPayload,
+          time_remaining_seconds: timeLeft,
+        },
+      });
 
-    await supabase.from("test_answers").insert(answerRows);
-    await supabase
-      .from("test_attempts")
-      .update({
-        score: scaledScore,
-        correct_count: correctCount,
-        completed_at: new Date().toISOString(),
-        time_remaining_seconds: timeLeft,
-        domain_scores: domainScores,
-        is_pass: pass,
-      })
-      .eq("id", attemptId);
+      if (error) {
+        toast({ title: "Submission failed", description: "Please try again.", variant: "destructive" });
+        setSubmitting(false);
+        return;
+      }
 
-    navigate(`/results/${attemptId}`);
+      navigate(`/results/${attemptId}`);
+    } catch (err) {
+      toast({ title: "Submission failed", description: "Please try again.", variant: "destructive" });
+      setSubmitting(false);
+    }
   }, [submitting, attemptId, questions, answers, timeLeft, navigate]);
 
   if (loading) {
@@ -245,7 +228,7 @@ export default function PracticeTest() {
               Navigator
             </Button>
             <Button size="sm" variant="destructive" onClick={handleSubmit} disabled={submitting}>
-              <Send className="h-4 w-4 mr-1" /> Submit
+              <Send className="h-4 w-4 mr-1" /> {submitting ? "Submitting..." : "Submit"}
             </Button>
           </div>
         </div>

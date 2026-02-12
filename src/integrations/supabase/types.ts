@@ -114,6 +114,13 @@ export type Database = {
             referencedRelation: "questions"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "test_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       test_attempts: {
@@ -160,10 +167,46 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      questions_public: {
+        Row: {
+          created_at: string | null
+          domain: string | null
+          explanation: string | null
+          id: string | null
+          options: Json | null
+          question_text: string | null
+          question_type: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          domain?: string | null
+          explanation?: string | null
+          id?: string | null
+          options?: Json | null
+          question_text?: string | null
+          question_type?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          domain?: string | null
+          explanation?: string | null
+          id?: string | null
+          options?: Json | null
+          question_text?: string | null
+          question_type?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      get_test_review: {
+        Args: { p_attempt_id: string }
+        Returns: {
+          correct_answers: string[]
+          explanation: string
+          question_id: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
