@@ -7,12 +7,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DOMAINS } from "@/lib/constants";
-import { CheckCircle2, XCircle, ChevronRight, BookOpen, Shuffle } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronRight, BookOpen, Shuffle, Loader2 } from "lucide-react";
 
 interface QuestionOption { id: string; text: string; }
 interface Question {
   id: string; domain: string; question_text: string; question_type: string;
-  options: QuestionOption[]; correct_answers: string[]; explanation: string | null;
+  options: QuestionOption[]; explanation: string | null;
+}
+
+interface RevealedResult {
+  is_correct: boolean;
+  correct_answers: string[];
+  explanation: string | null;
 }
 
 export default function StudyMode() {
@@ -22,12 +28,15 @@ export default function StudyMode() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<string[]>([]);
   const [revealed, setRevealed] = useState(false);
+  const [revealedResult, setRevealedResult] = useState<RevealedResult | null>(null);
+  const [checking, setChecking] = useState(false);
   const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.from("questions").select("*").then(({ data }) => {
+    // Fetch from the public view (no correct_answers)
+    (supabase as any).from("questions_public").select("*").then(({ data }: any) => {
       const qs = (data || []).map((q: any) => ({
         ...q,
         options: Array.isArray(q.options) ? q.options : [],
@@ -46,6 +55,7 @@ export default function StudyMode() {
     setCurrentIdx(0);
     setSelectedAnswers([]);
     setRevealed(false);
+    setRevealedResult(null);
     setStarted(true);
   };
 
@@ -55,12 +65,33 @@ export default function StudyMode() {
     );
   };
 
-  const checkAnswer = () => setRevealed(true);
+  const checkAnswer = async () => {
+    if (!questions[currentIdx]) return;
+    setChecking(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("check-answer", {
+        body: {
+          question_id: questions[currentIdx].id,
+          user_answers: selectedAnswers,
+        },
+      });
+      if (error) {
+        setRevealedResult({ is_correct: false, correct_answers: [], explanation: "Failed to check answer." });
+      } else {
+        setRevealedResult(data as RevealedResult);
+      }
+    } catch {
+      setRevealedResult({ is_correct: false, correct_answers: [], explanation: "Failed to check answer." });
+    }
+    setRevealed(true);
+    setChecking(false);
+  };
 
   const nextQuestion = () => {
     setCurrentIdx((i) => i + 1);
     setSelectedAnswers([]);
     setRevealed(false);
+    setRevealedResult(null);
   };
 
   const setAnswer = (optId: string, isMulti: boolean) => {
@@ -139,8 +170,8 @@ export default function StudyMode() {
   }
 
   const q = questions[currentIdx];
-  const isCorrect = revealed && q.correct_answers.length === selectedAnswers.length &&
-    q.correct_answers.every((ca) => selectedAnswers.includes(ca));
+  const correctAnswers = revealedResult?.correct_answers || [];
+  const isCorrect = revealedResult?.is_correct || false;
 
   return (
     <div className="min-h-screen bg-background">
@@ -167,7 +198,7 @@ export default function StudyMode() {
                 <div className="space-y-2">
                   {q.options.map((opt) => {
                     const isUserPick = selectedAnswers.includes(opt.id);
-                    const isCorrectOpt = q.correct_answers.includes(opt.id);
+                    const isCorrectOpt = revealed && correctAnswers.includes(opt.id);
                     let bg = "";
                     if (revealed) {
                       if (isCorrectOpt) bg = "bg-green-50 border-green-200";
@@ -188,7 +219,7 @@ export default function StudyMode() {
               <div className="space-y-2">
                 {q.options.map((opt) => {
                   const isUserPick = selectedAnswers.includes(opt.id);
-                  const isCorrectOpt = q.correct_answers.includes(opt.id);
+                  const isCorrectOpt = revealed && correctAnswers.includes(opt.id);
                   let bg = "";
                   if (revealed) {
                     if (isCorrectOpt) bg = "bg-green-50 border-green-200";
@@ -206,13 +237,13 @@ export default function StudyMode() {
               </div>
             )}
 
-            {revealed && (
+            {revealed && revealedResult && (
               <div className={`p-4 rounded-lg ${isCorrect ? "bg-green-50" : "bg-red-50"}`}>
                 <p className={`font-semibold text-sm ${isCorrect ? "text-green-700" : "text-red-700"}`}>
                   {isCorrect ? "Correct!" : "Incorrect"}
                 </p>
-                {q.explanation && (
-                  <p className="text-sm text-muted-foreground mt-2">{q.explanation}</p>
+                {revealedResult.explanation && (
+                  <p className="text-sm text-muted-foreground mt-2">{revealedResult.explanation}</p>
                 )}
               </div>
             )}
@@ -221,8 +252,8 @@ export default function StudyMode() {
 
         <div className="flex justify-between">
           {!revealed ? (
-            <Button onClick={checkAnswer} disabled={selectedAnswers.length === 0}>
-              Check Answer
+            <Button onClick={checkAnswer} disabled={selectedAnswers.length === 0 || checking}>
+              {checking ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Checking...</> : "Check Answer"}
             </Button>
           ) : (
             <Button onClick={nextQuestion} className="gap-1">
