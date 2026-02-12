@@ -34,9 +34,9 @@ export default function Landing() {
       {/* Hero */}
       <section className="container py-20 md:py-28 text-center">
         <div className="mx-auto max-w-3xl space-y-6">
-          <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">COF-C03 Certification
+          <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">
+            COF-C03 Certification
             <Snowflake className="h-4 w-4" />
-            COF-C02 Certification
           </div>
           <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl md:text-6xl">
             Pass the <span className="text-primary">SnowPro Core</span> Exam with Confidence
