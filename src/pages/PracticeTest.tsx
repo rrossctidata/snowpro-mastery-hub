@@ -44,9 +44,13 @@ export default function PracticeTest() {
   const [showNav, setShowNav] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
 
+  // Track whether we've already initialized to prevent re-runs on auth token refresh
+  const initializedRef = useRef(false);
+
   // Load questions from the public view (no correct_answers exposed)
   useEffect(() => {
-    if (!user) return;
+    if (!user || initializedRef.current) return;
+    initializedRef.current = true;
     (async () => {
       const { data: allQ } = await (supabase as any).from("questions_public").select("*");
       if (!allQ || allQ.length === 0) {
